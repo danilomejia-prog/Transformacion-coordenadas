@@ -1,0 +1,344 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Transformador UTM WGS84 a PSAD56</title>
+  <script src="https://cdn.jsdelivr.net/npm/proj4@2.11.0/dist/proj4.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/papaparse@5.4.1/papaparse.min.js"></script>
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      margin: 0;
+      background: #f4f7fb;
+      color: #1f2937;
+    }
+    .container {
+      max-width: 980px;
+      margin: 30px auto;
+      background: white;
+      border-radius: 14px;
+      box-shadow: 0 8px 30px rgba(0,0,0,0.08);
+      padding: 24px;
+    }
+    h1 { margin-top: 0; }
+    .grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+      gap: 14px;
+    }
+    label {
+      display: block;
+      font-weight: bold;
+      margin-bottom: 6px;
+    }
+    input, select, button {
+      width: 100%;
+      padding: 10px;
+      border-radius: 8px;
+      border: 1px solid #cbd5e1;
+      font-size: 14px;
+      box-sizing: border-box;
+    }
+    button {
+      background: #2563eb;
+      color: white;
+      border: none;
+      cursor: pointer;
+      font-weight: bold;
+    }
+    button:hover { background: #1d4ed8; }
+    button.secondary {
+      background: #475569;
+    }
+    .section {
+      margin-top: 22px;
+      padding-top: 12px;
+      border-top: 1px solid #e5e7eb;
+    }
+    .status {
+      margin-top: 12px;
+      padding: 12px;
+      border-radius: 8px;
+      background: #eff6ff;
+      border: 1px solid #bfdbfe;
+      white-space: pre-wrap;
+    }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      margin-top: 14px;
+      font-size: 13px;
+    }
+    th, td {
+      border: 1px solid #e5e7eb;
+      padding: 8px;
+      text-align: left;
+    }
+    th { background: #f8fafc; }
+    .muted { color: #64748b; font-size: 13px; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1>Transformador UTM WGS84 → PSAD56</h1>
+    <p class="muted">Versión web para GitHub Pages. Importa un archivo CSV, transforma coordenadas UTM y descarga un nuevo CSV con resultados.</p>
+
+    <div class="grid">
+      <div>
+        <label for="csvFile">Archivo CSV</label>
+        <input type="file" id="csvFile" accept=".csv" />
+      </div>
+      <div>
+        <label for="zona">Zona UTM</label>
+        <select id="zona">
+          <option value="17">17</option>
+          <option value="18">18</option>
+        </select>
+      </div>
+      <div>
+        <label for="hemisferio">Hemisferio</label>
+        <select id="hemisferio">
+          <option value="S">Sur (S)</option>
+          <option value="N">Norte (N)</option>
+        </select>
+      </div>
+      <div>
+        <label for="delimiter">Separador del CSV</label>
+        <select id="delimiter">
+          <option value=",">Coma (,)</option>
+          <option value=";">Punto y coma (;)</option>
+          <option value="tab">Tab</option>
+        </select>
+      </div>
+    </div>
+
+    <div class="section">
+      <div class="grid">
+        <div>
+          <label for="colEste">Columna Este (X)</label>
+          <select id="colEste"></select>
+        </div>
+        <div>
+          <label for="colNorte">Columna Norte (Y)</label>
+          <select id="colNorte"></select>
+        </div>
+        <div>
+          <label for="outputName">Nombre del CSV de salida</label>
+          <input type="text" id="outputName" value="resultado_transformado.csv" />
+        </div>
+        <div style="display:flex;align-items:end;">
+          <button id="btnTransformar">Transformar y descargar CSV</button>
+        </div>
+      </div>
+      <div id="status" class="status">Cargue un archivo CSV para comenzar.</div>
+    </div>
+
+    <div class="section">
+      <h3>Vista previa</h3>
+      <div style="overflow:auto; max-height: 360px;">
+        <table id="previewTable"></table>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    let csvData = [];
+    let csvFields = [];
+
+    function getDelimiter() {
+      const value = document.getElementById('delimiter').value;
+      return value === 'tab' ? '\t' : value;
+    }
+
+    function getEpsgOrigen(zona, hemisferio) {
+      zona = parseInt(zona, 10);
+      return hemisferio === 'S' ? `EPSG:${32700 + zona}` : `EPSG:${32600 + zona}`;
+    }
+
+    function getEpsgDestino(zona, hemisferio) {
+      zona = parseInt(zona, 10);
+      if (hemisferio === 'S') {
+        if (zona === 17) return 'EPSG:24877';
+        if (zona === 18) return 'EPSG:24878';
+      } else {
+        if (zona === 17) return 'EPSG:24817';
+        if (zona === 18) return 'EPSG:24818';
+      }
+      throw new Error('Zona/hemisferio PSAD56 no soportado en esta app.');
+    }
+
+    function defineProj4Defs() {
+      proj4.defs('EPSG:24877', '+proj=utm +zone=17 +south +ellps=intl +towgs84=-288,175,-376,0,0,0,0 +units=m +no_defs');
+      proj4.defs('EPSG:24878', '+proj=utm +zone=18 +south +ellps=intl +towgs84=-288,175,-376,0,0,0,0 +units=m +no_defs');
+      proj4.defs('EPSG:24817', '+proj=utm +zone=17 +ellps=intl +towgs84=-288,175,-376,0,0,0,0 +units=m +no_defs');
+      proj4.defs('EPSG:24818', '+proj=utm +zone=18 +ellps=intl +towgs84=-288,175,-376,0,0,0,0 +units=m +no_defs');
+    }
+
+    defineProj4Defs();
+
+    function setStatus(msg) {
+      document.getElementById('status').textContent = msg;
+    }
+
+    function populateColumnSelectors(fields) {
+      const colEste = document.getElementById('colEste');
+      const colNorte = document.getElementById('colNorte');
+      colEste.innerHTML = '';
+      colNorte.innerHTML = '';
+
+      fields.forEach(field => {
+        const opt1 = document.createElement('option');
+        opt1.value = field;
+        opt1.textContent = field;
+        colEste.appendChild(opt1);
+
+        const opt2 = document.createElement('option');
+        opt2.value = field;
+        opt2.textContent = field;
+        colNorte.appendChild(opt2);
+      });
+
+      const esteGuess = fields.find(f => /este|east|x/i.test(f)) || fields[0] || '';
+      const norteGuess = fields.find(f => /norte|north|y/i.test(f)) || fields[1] || fields[0] || '';
+      colEste.value = esteGuess;
+      colNorte.value = norteGuess;
+    }
+
+    function renderPreview(data, fields) {
+      const table = document.getElementById('previewTable');
+      table.innerHTML = '';
+      if (!data.length || !fields.length) return;
+
+      const thead = document.createElement('thead');
+      const headRow = document.createElement('tr');
+      fields.forEach(f => {
+        const th = document.createElement('th');
+        th.textContent = f;
+        headRow.appendChild(th);
+      });
+      thead.appendChild(headRow);
+      table.appendChild(thead);
+
+      const tbody = document.createElement('tbody');
+      data.slice(0, 8).forEach(row => {
+        const tr = document.createElement('tr');
+        fields.forEach(f => {
+          const td = document.createElement('td');
+          td.textContent = row[f] ?? '';
+          tr.appendChild(td);
+        });
+        tbody.appendChild(tr);
+      });
+      table.appendChild(tbody);
+    }
+
+    document.getElementById('csvFile').addEventListener('change', function(event) {
+      const file = event.target.files[0];
+      if (!file) return;
+
+      Papa.parse(file, {
+        header: true,
+        skipEmptyLines: true,
+        delimiter: getDelimiter(),
+        complete: function(results) {
+          csvData = results.data;
+          csvFields = results.meta.fields || [];
+
+          if (!csvFields.length) {
+            setStatus('No se pudieron identificar columnas en el CSV. Revise el separador.');
+            return;
+          }
+
+          populateColumnSelectors(csvFields);
+          renderPreview(csvData, csvFields);
+          setStatus(`Archivo cargado correctamente. Registros detectados: ${csvData.length}`);
+        },
+        error: function(err) {
+          setStatus('Error al leer el CSV: ' + err.message);
+        }
+      });
+    });
+
+    document.getElementById('delimiter').addEventListener('change', function() {
+      const fileInput = document.getElementById('csvFile');
+      if (fileInput.files.length) {
+        fileInput.dispatchEvent(new Event('change'));
+      }
+    });
+
+    document.getElementById('btnTransformar').addEventListener('click', function() {
+      if (!csvData.length) {
+        setStatus('Primero cargue un CSV.');
+        return;
+      }
+
+      const zona = document.getElementById('zona').value;
+      const hemisferio = document.getElementById('hemisferio').value;
+      const colEste = document.getElementById('colEste').value;
+      const colNorte = document.getElementById('colNorte').value;
+      const outputName = document.getElementById('outputName').value.trim() || 'resultado_transformado.csv';
+
+      try {
+        const epsgOrigen = getEpsgOrigen(zona, hemisferio);
+        const epsgDestino = getEpsgDestino(zona, hemisferio);
+        const transform = proj4(epsgOrigen, epsgDestino);
+
+        let ok = 0;
+        let err = 0;
+
+        const output = csvData.map((row) => {
+          const nuevo = { ...row };
+          const este = parseFloat(String(row[colEste]).replace(',', '.'));
+          const norte = parseFloat(String(row[colNorte]).replace(',', '.'));
+
+          if (isNaN(este) || isNaN(norte)) {
+            nuevo.Este_PSAD56 = '';
+            nuevo.Norte_PSAD56 = '';
+            nuevo.EPSG_Origen = epsgOrigen;
+            nuevo.EPSG_Destino = epsgDestino;
+            nuevo.Estado_Transformacion = 'Error: coordenadas no numéricas';
+            err++;
+            return nuevo;
+          }
+
+          try {
+            const result = transform.forward([este, norte]);
+            nuevo.Este_PSAD56 = result[0].toFixed(3);
+            nuevo.Norte_PSAD56 = result[1].toFixed(3);
+            nuevo.EPSG_Origen = epsgOrigen;
+            nuevo.EPSG_Destino = epsgDestino;
+            nuevo.Estado_Transformacion = 'OK';
+            ok++;
+          } catch (e) {
+            nuevo.Este_PSAD56 = '';
+            nuevo.Norte_PSAD56 = '';
+            nuevo.EPSG_Origen = epsgOrigen;
+            nuevo.EPSG_Destino = epsgDestino;
+            nuevo.Estado_Transformacion = 'Error: ' + e.message;
+            err++;
+          }
+
+          return nuevo;
+        });
+
+        const csv = Papa.unparse(output);
+        const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+        const url = URL.createObjectURL(blob);
+        const link = document.createElement('a');
+        link.href = url;
+        link.download = outputName.endsWith('.csv') ? outputName : outputName + '.csv';
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+        URL.revokeObjectURL(url);
+
+        renderPreview(output, Object.keys(output[0] || {}));
+        setStatus(`Proceso completado. OK: ${ok} | Errores: ${err}\nSe descargó el CSV transformado.`);
+      } catch (e) {
+        setStatus('Error en la transformación: ' + e.message);
+      }
+    });
+  </script>
+</body>
+</html>
