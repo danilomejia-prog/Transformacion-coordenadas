@@ -52,16 +52,8 @@
       color: #16345d;
     }
 
-    h1 {
-      font-size: 30px;
-      margin-bottom: 12px;
-    }
-
-    h2 {
-      font-size: 22px;
-      margin-top: 26px;
-      margin-bottom: 14px;
-    }
+    h1 { font-size: 30px; margin-bottom: 12px; }
+    h2 { font-size: 22px; margin-top: 26px; margin-bottom: 14px; }
 
     .note, .warn, .status {
       border-radius: 12px;
@@ -119,21 +111,10 @@
       transition: .15s ease;
     }
 
-    .btn-primary {
-      background: var(--primary);
-    }
-
-    .btn-primary:hover {
-      background: var(--primary-dark);
-    }
-
-    .btn-secondary {
-      background: var(--secondary);
-    }
-
-    .btn-secondary:hover {
-      background: var(--secondary-dark);
-    }
+    .btn-primary { background: var(--primary); }
+    .btn-primary:hover { background: var(--primary-dark); }
+    .btn-secondary { background: var(--secondary); }
+    .btn-secondary:hover { background: var(--secondary-dark); }
 
     .result-box {
       margin-top: 14px;
@@ -190,8 +171,8 @@
       </div>
 
       <div class="warn">
-        <strong>Importante:</strong> para Ecuador continental usa normalmente zonas 17S y 18S.  
-        Para Galápagos se habilitan las zonas 15S y 16S.  
+        <strong>Importante:</strong> para Ecuador continental usa normalmente zonas 17S y 18S.
+        Para Galápagos se habilitan las zonas 15S y 16S.
         La transformación de Galápagos en esta app es referencial y conviene validarla con puntos de control antes de usarla en cartografía oficial.
       </div>
 
@@ -301,7 +282,7 @@
       <div id="previewTable" class="table-wrap"></div>
 
       <p class="muted">
-        La app admite CSV con separador coma <strong>,</strong> o punto y coma <strong>;</strong>.  
+        La app admite CSV con separador coma <strong>,</strong> o punto y coma <strong>;</strong>.
         También reconoce encabezados típicos como <strong>X / Y</strong>, <strong>Este / Norte</strong> o <strong>Easting / Northing</strong>.
       </p>
     </div>
@@ -311,16 +292,23 @@
     let csvData = [];
     let transformedData = [];
 
+    // Definiciones manuales PSAD56 para que proj4 sí las reconozca
+    proj4.defs("EPSG:24877", "+proj=utm +zone=17 +south +datum=PSAD56 +units=m +no_defs");
+    proj4.defs("EPSG:24878", "+proj=utm +zone=18 +south +datum=PSAD56 +units=m +no_defs");
+    proj4.defs("EPSG:24817", "+proj=utm +zone=17 +datum=PSAD56 +units=m +no_defs");
+    proj4.defs("EPSG:24818", "+proj=utm +zone=18 +datum=PSAD56 +units=m +no_defs");
+
+    // Definiciones referenciales para Galápagos
+    proj4.defs("PSAD56_GAL_S_15", "+proj=utm +zone=15 +south +datum=PSAD56 +units=m +no_defs");
+    proj4.defs("PSAD56_GAL_S_16", "+proj=utm +zone=16 +south +datum=PSAD56 +units=m +no_defs");
+    proj4.defs("PSAD56_GAL_N_15", "+proj=utm +zone=15 +datum=PSAD56 +units=m +no_defs");
+    proj4.defs("PSAD56_GAL_N_16", "+proj=utm +zone=16 +datum=PSAD56 +units=m +no_defs");
+
     function llenarZonas(selectId, ambito) {
       const select = document.getElementById(selectId);
       select.innerHTML = "";
 
-      let zonas = [];
-      if (ambito === "continental") {
-        zonas = ["17", "18"];
-      } else if (ambito === "galapagos") {
-        zonas = ["15", "16"];
-      }
+      const zonas = ambito === "galapagos" ? ["15", "16"] : ["17", "18"];
 
       zonas.forEach(z => {
         const option = document.createElement("option");
@@ -355,23 +343,10 @@
       }
 
       if (ambito === "galapagos") {
-        // Definiciones referenciales para uso en la app
-        if (hemisferio === "S" && zona === 15) {
-          proj4.defs("PSAD56_GAL_S_15", "+proj=utm +zone=15 +south +datum=PSAD56 +units=m +no_defs");
-          return "PSAD56_GAL_S_15";
-        }
-        if (hemisferio === "S" && zona === 16) {
-          proj4.defs("PSAD56_GAL_S_16", "+proj=utm +zone=16 +south +datum=PSAD56 +units=m +no_defs");
-          return "PSAD56_GAL_S_16";
-        }
-        if (hemisferio === "N" && zona === 15) {
-          proj4.defs("PSAD56_GAL_N_15", "+proj=utm +zone=15 +datum=PSAD56 +units=m +no_defs");
-          return "PSAD56_GAL_N_15";
-        }
-        if (hemisferio === "N" && zona === 16) {
-          proj4.defs("PSAD56_GAL_N_16", "+proj=utm +zone=16 +datum=PSAD56 +units=m +no_defs");
-          return "PSAD56_GAL_N_16";
-        }
+        if (hemisferio === "S" && zona === 15) return "PSAD56_GAL_S_15";
+        if (hemisferio === "S" && zona === 16) return "PSAD56_GAL_S_16";
+        if (hemisferio === "N" && zona === 15) return "PSAD56_GAL_N_15";
+        if (hemisferio === "N" && zona === 16) return "PSAD56_GAL_N_16";
       }
 
       throw new Error("Configuración de zona/hemisferio no soportada.");
@@ -447,7 +422,6 @@
 
           let headers = Object.keys(csvData[0]);
 
-          // Caso especial: el CSV vino como una sola columna tipo X;Y
           if (headers.length === 1 && headers[0].includes(";")) {
             const headerParts = headers[0].split(";").map(h => h.trim());
 
@@ -466,25 +440,21 @@
             headers = headerParts;
           }
 
-          // Caso especial: encabezado normal pero datos en una sola columna
           if (headers.length === 1 && csvData.length > 0) {
             const firstKey = headers[0];
             const firstVal = csvData[0][firstKey];
 
             if (typeof firstVal === "string" && firstVal.includes(";")) {
-              const generatedHeaders = ["X", "Y"];
-
               csvData = csvData.map(row => {
                 const raw = String(row[firstKey]);
                 const parts = raw.split(";");
-
                 return {
                   X: parts[0] ? parts[0].trim() : "",
                   Y: parts[1] ? parts[1].trim() : ""
                 };
               });
 
-              headers = generatedHeaders;
+              headers = ["X", "Y"];
             }
           }
 
@@ -562,7 +532,7 @@
           nuevo.Este_PSAD56 = "";
           nuevo.Norte_PSAD56 = "";
           nuevo.EPSG_Origen = epsgWGS84(zona, hemisferio);
-          nuevo.EPSG_Destino = definirDestinoSeguro(zona, hemisferio, ambito);
+          nuevo.EPSG_Destino = destinoSeguro(zona, hemisferio, ambito);
           nuevo.Estado_Transformacion = "ERROR: " + e.message;
           error++;
         }
@@ -579,7 +549,7 @@
       mostrarPreview(transformedData.slice(0, 5));
     }
 
-    function definirDestinoSeguro(zona, hemisferio, ambito) {
+    function destinoSeguro(zona, hemisferio, ambito) {
       try {
         return definirPSAD56(zona, hemisferio, ambito);
       } catch {
