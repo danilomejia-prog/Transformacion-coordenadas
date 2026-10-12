@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Transformador UTM WGS84 → PSAD56</title>
+  <title>Transformador geodésico WGS84 → PSAD56 | Ecuador</title>
 
   <script src="https://cdn.jsdelivr.net/npm/proj4@2.9.2/dist/proj4.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/papaparse@5.4.1/papaparse.min.js"></script>
@@ -167,15 +167,16 @@
       <h1>Transformador UTM WGS84 → PSAD56</h1>
 
       <div class="note">
-        Esta app permite transformar coordenadas UTM desde WGS84 hacia PSAD56 para Ecuador continental y, de forma referencial, también para Galápagos.
+        Transformación de coordenadas UTM WGS84 a PSAD56 en Ecuador continental usando la operación EPSG:3990 (IGM Ecuador, 7 parámetros; exactitud publicada 5 m). Se calcula también el desplazamiento planimétrico entre ambos pares de coordenadas.
       </div>
 
       <div class="warn">
         <strong>Importante:</strong> para Ecuador continental usa normalmente zonas 17S y 18S.
-        Para Galápagos se habilitan las zonas 15S y 16S.
-        La transformación de Galápagos en esta app es referencial y conviene validarla con puntos de control antes de usarla en cartografía oficial.
+        Para Galápagos no se dispone aquí de una operación geodésica validada.
+        El cálculo en Galápagos queda bloqueado para evitar resultados incorrectos.
       </div>
 
+      <p class="muted"><strong>Operación de datum:</strong> EPSG:3990 invertida (IGM Ecuador, precisión declarada 5 m, aplicable al territorio continental). El desplazamiento entre representaciones cartográficas no implica movimiento físico del sitio.</p>
       <h2>1. Transformación individual</h2>
 
       <div class="grid-3">
@@ -193,7 +194,7 @@
           <label for="ambito">Ámbito</label>
           <select id="ambito">
             <option value="continental">Ecuador continental</option>
-            <option value="galapagos">Galápagos</option>
+            <option value="galapagos">Galápagos (sin transformación validada)</option>
           </select>
         </div>
       </div>
@@ -251,7 +252,7 @@
           <label for="ambitoCsv">Ámbito</label>
           <select id="ambitoCsv">
             <option value="continental">Ecuador continental</option>
-            <option value="galapagos">Galápagos</option>
+            <option value="galapagos">Galápagos (sin transformación validada)</option>
           </select>
         </div>
 
@@ -292,23 +293,28 @@
     let csvData = [];
     let transformedData = [];
 
-    // Definiciones manuales PSAD56 para que proj4 sí las reconozca
-    proj4.defs("EPSG:24877", "+proj=utm +zone=17 +south +datum=PSAD56 +units=m +no_defs");
-    proj4.defs("EPSG:24878", "+proj=utm +zone=18 +south +datum=PSAD56 +units=m +no_defs");
-    proj4.defs("EPSG:24817", "+proj=utm +zone=17 +datum=PSAD56 +units=m +no_defs");
-    proj4.defs("EPSG:24818", "+proj=utm +zone=18 +datum=PSAD56 +units=m +no_defs");
-
-    // Definiciones referenciales para Galápagos
-    proj4.defs("PSAD56_GAL_S_15", "+proj=utm +zone=15 +south +datum=PSAD56 +units=m +no_defs");
-    proj4.defs("PSAD56_GAL_S_16", "+proj=utm +zone=16 +south +datum=PSAD56 +units=m +no_defs");
-    proj4.defs("PSAD56_GAL_N_15", "+proj=utm +zone=15 +datum=PSAD56 +units=m +no_defs");
-    proj4.defs("PSAD56_GAL_N_16", "+proj=utm +zone=16 +datum=PSAD56 +units=m +no_defs");
+     // EPSG:3990 PSAD56 -> WGS84 (14), transformación IGM Ecuador.
+     // EPSG registra las ROTACIONES con convención Coordinate Frame.
+     // Proj4js +towgs84 usa la convención Position Vector: invertir signos rx, ry, rz.
+     // Fuente: https://epsg.io/3990
+     // EPSG:3990: dx=-60.31 dy=245.935 dz=31.008 (m),
+     // rx=-12.324 ry=-3.755 rz=+7.37 (arcsec, Coordinate Frame), s=+0.447 ppm.
+     const TOWGS84_IGM = "-60.31,245.935,31.008,12.324,3.755,-7.37,0.447";
+     [17,18].forEach(z => {
+       ["N","S"].forEach(h => {
+         const south = h === "S" ? " +south" : "";
+         const epsgWgs = `EPSG:${h === "S" ? 32700 + z : 32600 + z}`;
+         const epsgPsad = `EPSG:${h === "S" ? 24860 + z : 24800 + z}`;
+         proj4.defs(epsgWgs, `+proj=utm +zone=${z}${south} +datum=WGS84 +units=m +no_defs`);
+         proj4.defs(epsgPsad, `+proj=utm +zone=${z}${south} +ellps=intl +towgs84=${TOWGS84_IGM} +units=m +no_defs`);
+       });
+     });
 
     function llenarZonas(selectId, ambito) {
       const select = document.getElementById(selectId);
       select.innerHTML = "";
 
-      const zonas = ambito === "galapagos" ? ["15", "16"] : ["17", "18"];
+      const zonas = ambito === "galapagos" ? [] : ["17", "18"];
 
       zonas.forEach(z => {
         const option = document.createElement("option");
@@ -332,25 +338,16 @@
       return hemisferio === "S" ? `EPSG:${32700 + zona}` : `EPSG:${32600 + zona}`;
     }
 
-    function definirPSAD56(zona, hemisferio, ambito) {
-      zona = parseInt(zona, 10);
-
-      if (ambito === "continental") {
-        if (hemisferio === "S" && zona === 17) return "EPSG:24877";
-        if (hemisferio === "S" && zona === 18) return "EPSG:24878";
-        if (hemisferio === "N" && zona === 17) return "EPSG:24817";
-        if (hemisferio === "N" && zona === 18) return "EPSG:24818";
-      }
-
-      if (ambito === "galapagos") {
-        if (hemisferio === "S" && zona === 15) return "PSAD56_GAL_S_15";
-        if (hemisferio === "S" && zona === 16) return "PSAD56_GAL_S_16";
-        if (hemisferio === "N" && zona === 15) return "PSAD56_GAL_N_15";
-        if (hemisferio === "N" && zona === 16) return "PSAD56_GAL_N_16";
-      }
-
-      throw new Error("Configuración de zona/hemisferio no soportada.");
-    }
+     function definirPSAD56(zona, hemisferio, ambito) {
+       zona = parseInt(zona, 10);
+       if (ambito !== "continental") {
+         throw new Error("Galápagos está fuera del ámbito de EPSG:3990. Se requiere una transformación local validada.");
+       }
+       if (![17,18].includes(zona) || !["N","S"].includes(hemisferio)) {
+         throw new Error("Zona o hemisferio no compatibles con esta implementación.");
+       }
+       return `EPSG:${hemisferio === "S" ? 24860 + zona : 24800 + zona}`;
+     }
 
     function transformarCoordenada(este, norte, zona, hemisferio, ambito) {
       const origen = epsgWGS84(zona, hemisferio);
@@ -372,6 +369,9 @@
       return {
         este: resultado[0],
         norte: resultado[1],
+        dx: x - resultado[0],
+        dy: y - resultado[1],
+        desplazamiento: Math.hypot(x - resultado[0], y - resultado[1]),
         epsg_origen: origen,
         epsg_destino: destino
       };
@@ -391,6 +391,10 @@
           `Resultado:\n` +
           `Este PSAD56: ${r.este.toFixed(3)}\n` +
           `Norte PSAD56: ${r.norte.toFixed(3)}\n` +
+          `ΔX = X WGS84 − X PSAD56: ${r.dx.toFixed(3)} m\n` +
+          `ΔY = Y WGS84 − Y PSAD56: ${r.dy.toFixed(3)} m\n` +
+          `Desplazamiento: ${r.desplazamiento.toFixed(3)} m\n` +
+          `Operación EPSG:3990 (inversa)\n` +
           `EPSG origen: ${r.epsg_origen}\n` +
           `EPSG destino: ${r.epsg_destino}`;
       } catch (e) {
@@ -524,6 +528,10 @@
 
           nuevo.Este_PSAD56 = r.este.toFixed(3);
           nuevo.Norte_PSAD56 = r.norte.toFixed(3);
+          nuevo.Delta_X_m = r.dx.toFixed(3);
+          nuevo.Delta_Y_m = r.dy.toFixed(3);
+          nuevo.Desplazamiento_m = r.desplazamiento.toFixed(3);
+          nuevo.Operacion_datum = "EPSG:3990 (inversa)";
           nuevo.EPSG_Origen = r.epsg_origen;
           nuevo.EPSG_Destino = r.epsg_destino;
           nuevo.Estado_Transformacion = "OK";
@@ -531,6 +539,10 @@
         } catch (e) {
           nuevo.Este_PSAD56 = "";
           nuevo.Norte_PSAD56 = "";
+          nuevo.Delta_X_m = "";
+          nuevo.Delta_Y_m = "";
+          nuevo.Desplazamiento_m = "";
+          nuevo.Operacion_datum = "";
           nuevo.EPSG_Origen = epsgWGS84(zona, hemisferio);
           nuevo.EPSG_Destino = destinoSeguro(zona, hemisferio, ambito);
           nuevo.Estado_Transformacion = "ERROR: " + e.message;
