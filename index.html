@@ -115,6 +115,8 @@
     .btn-primary:hover { background: var(--primary-dark); }
     .btn-secondary { background: var(--secondary); }
     .btn-secondary:hover { background: var(--secondary-dark); }
+    .btn:disabled { background: #6e7887; cursor: not-allowed; }
+    .zone-help { line-height: 1.5; white-space: normal; }
 
     .result-box {
       margin-top: 14px;
@@ -171,9 +173,9 @@
       </div>
 
       <div class="warn">
-        <strong>Importante:</strong> para Ecuador continental usa normalmente zonas 17S y 18S.
-        Para Galápagos no se dispone aquí de una operación geodésica validada.
-        El cálculo en Galápagos queda bloqueado para evitar resultados incorrectos.
+        <strong>Zonas UTM:</strong> Ecuador continental: 17 y 18. Galápagos: 15 y 16.
+        Selecciona Norte (N) o Sur (S) según el sistema de referencia de tus datos.
+        La operación EPSG:3990 incluida solo cubre Ecuador continental. Las zonas de Galápagos pueden seleccionarse, pero la transformación a PSAD56 requiere parámetros locales validados que no están incorporados en este archivo.
       </div>
 
       <p class="muted"><strong>Operación de datum:</strong> EPSG:3990 invertida (IGM Ecuador, precisión declarada 5 m, aplicable al territorio continental). El desplazamiento entre representaciones cartográficas no implica movimiento físico del sitio.</p>
@@ -194,7 +196,7 @@
           <label for="ambito">Ámbito</label>
           <select id="ambito">
             <option value="continental">Ecuador continental</option>
-            <option value="galapagos">Galápagos (sin transformación validada)</option>
+            <option value="galapagos">Galápagos (zonas 15 y 16)</option>
           </select>
         </div>
       </div>
@@ -215,10 +217,11 @@
 
         <div class="field">
           <label>&nbsp;</label>
-          <button class="btn btn-primary" onclick="transformarIndividual()">Transformar punto</button>
+          <button id="btnIndividual" class="btn btn-primary" onclick="transformarIndividual()">Transformar punto</button>
         </div>
       </div>
 
+      <div id="infoZona" class="note zone-help" role="status" aria-live="polite"></div>
       <div id="resultadoIndividual" class="result-box">Aquí aparecerá el resultado.</div>
 
       <h2>2. Cargar archivo CSV</h2>
@@ -252,7 +255,7 @@
           <label for="ambitoCsv">Ámbito</label>
           <select id="ambitoCsv">
             <option value="continental">Ecuador continental</option>
-            <option value="galapagos">Galápagos (sin transformación validada)</option>
+            <option value="galapagos">Galápagos (zonas 15 y 16)</option>
           </select>
         </div>
 
@@ -270,11 +273,13 @@
         </div>
       </div>
 
+      <div id="infoZonaCsv" class="note zone-help" role="status" aria-live="polite"></div>
+
       <h2>3. Procesar y descargar</h2>
 
       <div class="grid-2">
-        <button class="btn btn-secondary" onclick="transformarCSV()">Transformar CSV</button>
-        <button class="btn btn-primary" onclick="descargarCSV()">Descargar CSV resultado</button>
+        <button id="btnCSV" class="btn btn-secondary" onclick="transformarCSV()">Transformar CSV</button>
+        <button id="btnDescargar" class="btn btn-primary" onclick="descargarCSV()" disabled>Descargar CSV resultado</button>
       </div>
 
       <div id="statusCSV" class="status">Sin archivo cargado.</div>
@@ -286,6 +291,7 @@
         La app admite CSV con separador coma <strong>,</strong> o punto y coma <strong>;</strong>.
         También reconoce encabezados típicos como <strong>X / Y</strong>, <strong>Este / Norte</strong> o <strong>Easting / Northing</strong>.
       </p>
+      <p class="muted">Referencia de zonas: <a href="https://www.geoportaligm.gob.ec/portal_geodesia/pages/modelo-de-velocidades.html" target="_blank" rel="noopener noreferrer">IGM Ecuador: zonas 15–16 en Galápagos y 17–18 en el continente</a>. Zona 15: de 96° O a 90° O; zona 16: de 90° O a 84° O. Escoge la zona indicada en los metadatos de tus coordenadas; cambiar el selector no reproyecta los datos de entrada. Esta versión utiliza Proj4js y PapaParse desde internet.</p>
     </div>
   </div>
 
@@ -300,48 +306,87 @@
      // EPSG:3990: dx=-60.31 dy=245.935 dz=31.008 (m),
      // rx=-12.324 ry=-3.755 rz=+7.37 (arcsec, Coordinate Frame), s=+0.447 ppm.
      const TOWGS84_IGM = "-60.31,245.935,31.008,12.324,3.755,-7.37,0.447";
-     [17,18].forEach(z => {
+     [15,16,17,18].forEach(z => {
        ["N","S"].forEach(h => {
          const south = h === "S" ? " +south" : "";
          const epsgWgs = `EPSG:${h === "S" ? 32700 + z : 32600 + z}`;
-         const epsgPsad = `EPSG:${h === "S" ? 24860 + z : 24800 + z}`;
          proj4.defs(epsgWgs, `+proj=utm +zone=${z}${south} +datum=WGS84 +units=m +no_defs`);
-         proj4.defs(epsgPsad, `+proj=utm +zone=${z}${south} +ellps=intl +towgs84=${TOWGS84_IGM} +units=m +no_defs`);
+         // EPSG:3990 se mantiene únicamente en sus zonas continentales.
+         // No asignar códigos PSAD56 ficticios a las zonas 15 y 16.
+         if ([17,18].includes(z)) {
+           const epsgPsad = `EPSG:${h === "S" ? 24860 + z : 24800 + z}`;
+           proj4.defs(epsgPsad, `+proj=utm +zone=${z}${south} +ellps=intl +towgs84=${TOWGS84_IGM} +units=m +no_defs`);
+         }
        });
      });
 
     function llenarZonas(selectId, ambito) {
       const select = document.getElementById(selectId);
+      const anterior = select.value;
       select.innerHTML = "";
 
-      const zonas = ambito === "galapagos" ? [] : ["17", "18"];
+      const zonas = ambito === "galapagos" ? ["15", "16"] : ["17", "18"];
+      const limites = {15: "96° O–90° O", 16: "90° O–84° O", 17: "84° O–78° O", 18: "78° O–72° O"};
 
       zonas.forEach(z => {
         const option = document.createElement("option");
         option.value = z;
-        option.textContent = z;
+        option.textContent = `${z} (${limites[z]})`;
         select.appendChild(option);
       });
+      if (zonas.includes(anterior)) select.value = anterior;
     }
 
-    function actualizarZonas() {
-      llenarZonas("zona", document.getElementById("ambito").value);
-      llenarZonas("zonaCsv", document.getElementById("ambitoCsv").value);
+    function actualizarZonas(sufijo = "") {
+      llenarZonas("zona" + sufijo, document.getElementById("ambito" + sufijo).value);
+      actualizarContexto(sufijo);
     }
 
-    document.getElementById("ambito").addEventListener("change", actualizarZonas);
-    document.getElementById("ambitoCsv").addEventListener("change", actualizarZonas);
-    actualizarZonas();
+    const MENSAJE_GALAPAGOS = "La zona UTM está disponible, pero EPSG:3990 no cubre Galápagos. Para transformar a PSAD56 se necesitan una operación local validada y la confirmación del datum de origen y destino.";
+
+    function actualizarContexto(sufijo = "") {
+      const ambito = document.getElementById("ambito" + sufijo).value;
+      const zona = document.getElementById("zona" + sufijo).value;
+      const hemisferio = document.getElementById("hemisferio" + sufijo).value;
+      const esGalapagos = ambito === "galapagos";
+      const info = document.getElementById("infoZona" + sufijo);
+      info.className = (esGalapagos ? "warn" : "note") + " zone-help";
+      info.textContent = `Origen: WGS84 / UTM ${zona}${hemisferio} (${epsgWGS84(zona, hemisferio)}). ` +
+        (esGalapagos ? MENSAJE_GALAPAGOS : "Transformación a PSAD56 mediante EPSG:3990 inversa, para Ecuador continental. Exactitud publicada: 5 m.");
+      const boton = document.getElementById(sufijo ? "btnCSV" : "btnIndividual");
+      boton.disabled = esGalapagos;
+      boton.title = esGalapagos ? MENSAJE_GALAPAGOS : "";
+      if (sufijo) {
+        transformedData = [];
+        document.getElementById("btnDescargar").disabled = true;
+        if (csvData.length) {
+          mostrarPreview(csvData.slice(0, 5));
+          document.getElementById("statusCSV").textContent = esGalapagos ? MENSAJE_GALAPAGOS : "Configuración actualizada. Transforma nuevamente el CSV antes de descargar.";
+        }
+      } else {
+        document.getElementById("resultadoIndividual").textContent = esGalapagos ? "Transformación a PSAD56 pendiente de parámetros locales para Galápagos." : "Aquí aparecerá el resultado.";
+      }
+    }
+
+    ["", "Csv"].forEach(sufijo => {
+      document.getElementById("ambito" + sufijo).addEventListener("change", () => actualizarZonas(sufijo));
+      ["zona", "hemisferio"].forEach(id => document.getElementById(id + sufijo).addEventListener("change", () => actualizarContexto(sufijo)));
+      actualizarZonas(sufijo);
+    });
+    ["colEste", "colNorte"].forEach(id => document.getElementById(id).addEventListener("change", () => actualizarContexto("Csv")));
 
     function epsgWGS84(zona, hemisferio) {
       zona = parseInt(zona, 10);
+      if (![15,16,17,18].includes(zona) || !["N","S"].includes(hemisferio)) {
+        throw new Error("Selecciona una zona UTM y un hemisferio válidos.");
+      }
       return hemisferio === "S" ? `EPSG:${32700 + zona}` : `EPSG:${32600 + zona}`;
     }
 
      function definirPSAD56(zona, hemisferio, ambito) {
        zona = parseInt(zona, 10);
        if (ambito !== "continental") {
-         throw new Error("Galápagos está fuera del ámbito de EPSG:3990. Se requiere una transformación local validada.");
+         throw new Error(MENSAJE_GALAPAGOS);
        }
        if (![17,18].includes(zona) || !["N","S"].includes(hemisferio)) {
          throw new Error("Zona o hemisferio no compatibles con esta implementación.");
@@ -418,6 +463,7 @@
         complete: function(results) {
           csvData = results.data;
           transformedData = [];
+          document.getElementById("btnDescargar").disabled = true;
 
           if (!csvData.length) {
             status.textContent = "El CSV no contiene registros.";
@@ -509,6 +555,13 @@
       const ambito = document.getElementById("ambitoCsv").value;
       const status = document.getElementById("statusCSV");
 
+      if (ambito === "galapagos") {
+        transformedData = [];
+        document.getElementById("btnDescargar").disabled = true;
+        status.textContent = MENSAJE_GALAPAGOS;
+        return;
+      }
+
       if (!csvData.length) {
         status.textContent = "Primero carga un CSV.";
         return;
@@ -559,6 +612,7 @@
         `Zona aplicada: ${zona}${hemisferio}`;
 
       mostrarPreview(transformedData.slice(0, 5));
+      document.getElementById("btnDescargar").disabled = !transformedData.length;
     }
 
     function destinoSeguro(zona, hemisferio, ambito) {
